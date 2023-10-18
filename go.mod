@@ -1,3 +1,3 @@
-module github.com/admiralhr99/anewNG.git
+module github.com/admiralhr99/anewNG
 
-go 1.21.1
+go 1.21
