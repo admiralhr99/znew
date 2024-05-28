@@ -28,18 +28,21 @@ func main() {
 
 	if fn != "" {
 		r, err := os.Open(fn)
-		if err == nil {
-			sc := bufio.NewScanner(r)
-			for sc.Scan() {
-				line := sc.Text()
-				if trim {
-					line = strings.TrimSpace(line)
-				}
-				lineMutex.Lock()
-				lines[line] = struct{}{}
-				lineMutex.Unlock()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open file for reading: %s\n", err)
+			return
+		}
+		defer r.Close()
+
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			line := sc.Text()
+			if trim {
+				line = strings.TrimSpace(line)
 			}
-			r.Close()
+			lineMutex.Lock()
+			lines[line] = struct{}{}
+			lineMutex.Unlock()
 		}
 
 		if !dryRun {
@@ -53,23 +56,30 @@ func main() {
 	}
 
 	sc := bufio.NewScanner(os.Stdin)
+	var wg sync.WaitGroup
 	for sc.Scan() {
-		line := sc.Text()
-		if trim {
-			line = strings.TrimSpace(line)
-		}
-		lineMutex.Lock()
-		if _, exists := lines[line]; !exists {
-			lines[line] = struct{}{}
-			lineMutex.Unlock()
-			if !quietMode {
-				fmt.Println(line)
+		wg.Add(1)
+		go func(line string) {
+			defer wg.Done()
+			if trim {
+				line = strings.TrimSpace(line)
 			}
-			if !dryRun && fn != "" {
-				fmt.Fprintf(f, "%s\n", line)
+			lineMutex.Lock()
+			if _, exists := lines[line]; !exists {
+				lines[line] = struct{}{}
+				lineMutex.Unlock()
+				if !quietMode {
+					fmt.Println(line)
+				}
+				if !dryRun && fn != "" {
+					if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+						fmt.Fprintf(os.Stderr, "failed to write to file: %s\n", err)
+					}
+				}
+			} else {
+				lineMutex.Unlock()
 			}
-		} else {
-			lineMutex.Unlock()
-		}
+		}(sc.Text())
 	}
+	wg.Wait()
 }
