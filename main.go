@@ -11,15 +11,21 @@ import (
 )
 
 func main() {
-	var quietMode, dryRun, trim bool
+	var quietMode, dryRun bool
 	flag.BoolVar(&quietMode, "q", false, "quiet mode (no output at all)")
 	flag.BoolVar(&dryRun, "d", false, "don't append anything to the file, just print the new lines to stdout")
-	flag.BoolVar(&trim, "t", false, "trim leading and trailing whitespace before comparison")
+
+	// Parse flags after defining them, but before accessing them
 	flag.Parse()
 
-	fn := flag.Arg(0)
+	// Get non-flag arguments
+	args := flag.Args()
+	var fn string
+	if len(args) > 0 {
+		fn = args[0]
+	}
 
-	lines := readExistingLines(fn, trim)
+	lines := readExistingLines(fn)
 
 	var f io.WriteCloser
 	var err error
@@ -32,10 +38,10 @@ func main() {
 		defer f.Close()
 	}
 
-	processInput(lines, f, quietMode, dryRun, trim)
+	processInput(lines, f, quietMode, dryRun)
 }
 
-func readExistingLines(fn string, trim bool) sync.Map {
+func readExistingLines(fn string) sync.Map {
 	var lines sync.Map
 	if fn == "" {
 		return lines
@@ -49,16 +55,15 @@ func readExistingLines(fn string, trim bool) sync.Map {
 
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		line := sc.Text()
-		if trim {
-			line = strings.TrimSpace(line)
+		line := strings.TrimSpace(sc.Text())
+		if line != "" {
+			lines.Store(line, true)
 		}
-		lines.Store(line, true)
 	}
 	return lines
 }
 
-func processInput(lines sync.Map, f io.Writer, quietMode, dryRun, trim bool) {
+func processInput(lines sync.Map, f io.Writer, quietMode, dryRun bool) {
 	sc := bufio.NewScanner(os.Stdin)
 	var wg sync.WaitGroup
 	inputChan := make(chan string)
@@ -66,7 +71,7 @@ func processInput(lines sync.Map, f io.Writer, quietMode, dryRun, trim bool) {
 	// Start worker goroutines
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
-		go processLine(inputChan, &lines, f, quietMode, dryRun, trim, &wg)
+		go processLine(inputChan, &lines, f, quietMode, dryRun, &wg)
 	}
 
 	// Read input and send to workers
@@ -78,11 +83,12 @@ func processInput(lines sync.Map, f io.Writer, quietMode, dryRun, trim bool) {
 	wg.Wait()
 }
 
-func processLine(inputChan <-chan string, lines *sync.Map, f io.Writer, quietMode, dryRun, trim bool, wg *sync.WaitGroup) {
+func processLine(inputChan <-chan string, lines *sync.Map, f io.Writer, quietMode, dryRun bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for line := range inputChan {
-		if trim {
-			line = strings.TrimSpace(line)
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
 		if _, exists := lines.LoadOrStore(line, true); !exists {
 			if !quietMode {
