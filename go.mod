@@ -1,3 +1,3 @@
-module github.com/admiralhr99/znew
+module znew
 
-go 1.21.1
+go 1.21.3
