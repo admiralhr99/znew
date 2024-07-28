@@ -1,3 +1,3 @@
-module github.com/admiralhr99/anewNG
+module github.com/admiralhr99/znew
 
 go 1.21.1
