@@ -1,4 +1,4 @@
-# anewNG
+# znew
 This project contains refactored code originally developed by https://github.com/tomnomnom/anew. The refactoring enhances performance and adds new features, making the code suitable for handling large files.
 
 ## Features
@@ -16,13 +16,13 @@ This project contains refactored code originally developed by https://github.com
 1. Clone the repository to your local machine:
 
     ```bash
-    git clone https://github.com/admiralhr99/anewNG.git 
+    git clone https://github.com/admiralhr99/znew.git 
     ```
 
 2. Navigate to the project directory:
 
     ```bash
-    cd anewNG
+    cd znew
     ```
 
 3. Build the project:
@@ -38,7 +38,7 @@ Alternatively, you can install the package directly using `go install`:
 1. Run the following command to install the package:
 
     ```bash
-    go install github.com/admiralhr99/anewNG@latest
+    go install github.com/admiralhr99/znew@latest
     ```
 
 
