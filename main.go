@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"strings"
-	"sync"
+)
+
+const (
+	// Constants for performance optimization
+	readBufferSize  = 16 * 1024 * 1024 // 16MB read buffer
+	writeBufferSize = 8 * 1024 * 1024  // 8MB write buffer
 )
 
 func main() {
@@ -25,78 +29,104 @@ func main() {
 		fn = args[0]
 	}
 
-	lines := readExistingLines(fn)
+	// Create a map to track existing lines
+	// Using map[string]struct{} is more memory efficient than map[string]bool
+	existingLines := make(map[string]struct{})
 
-	var f io.WriteCloser
-	var err error
+	// Load existing lines if a file was specified
+	if fn != "" {
+		if err := loadExistingLines(fn, existingLines); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to fully load existing file: %s\n", err)
+		}
+	}
+
+	// Open file for writing if needed
+	var outFile *os.File
+	var writer *bufio.Writer
 	if fn != "" && !dryRun {
-		f, err = os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+		var err error
+		outFile, err = os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to open file for writing: %s\n", err)
 			return
 		}
-		defer f.Close()
+		defer outFile.Close()
+
+		// Use buffered writer for better performance
+		writer = bufio.NewWriterSize(outFile, writeBufferSize)
+		defer writer.Flush()
 	}
 
-	processInput(lines, f, quietMode, dryRun)
+	// Process stdin
+	processInput(existingLines, writer, quietMode)
 }
 
-func readExistingLines(fn string) sync.Map {
-	var lines sync.Map
-	if fn == "" {
-		return lines
-	}
-
-	r, err := os.Open(fn)
+// loadExistingLines reads an existing file to populate the line map
+func loadExistingLines(fn string, existingLines map[string]struct{}) error {
+	file, err := os.Open(fn)
 	if err != nil {
-		return lines
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist yet, which is fine
+		}
+		return err
 	}
-	defer r.Close()
+	defer file.Close()
 
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	// Create a buffered scanner with a large buffer for efficiency
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, readBufferSize)
+	scanner.Buffer(buf, readBufferSize)
+
+	// Read lines and add to map
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			lines.Store(line, true)
+			existingLines[line] = struct{}{}
 		}
 	}
-	return lines
+
+	return scanner.Err()
 }
 
-func processInput(lines sync.Map, f io.Writer, quietMode, dryRun bool) {
-	sc := bufio.NewScanner(os.Stdin)
-	var wg sync.WaitGroup
-	inputChan := make(chan string)
+// processInput handles the stdin
+func processInput(existingLines map[string]struct{}, writer *bufio.Writer, quietMode bool) {
+	scanner := bufio.NewScanner(os.Stdin)
 
-	// Start worker goroutines
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go processLine(inputChan, &lines, f, quietMode, dryRun, &wg)
-	}
+	// Use a larger buffer for scanner to handle long lines
+	buf := make([]byte, readBufferSize)
+	scanner.Buffer(buf, readBufferSize)
 
-	// Read input and send to workers
-	for sc.Scan() {
-		inputChan <- sc.Text()
-	}
-	close(inputChan)
-
-	wg.Wait()
-}
-
-func processLine(inputChan <-chan string, lines *sync.Map, f io.Writer, quietMode, dryRun bool, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for line := range inputChan {
-		line = strings.TrimSpace(line)
+	// Process each line from stdin
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		if _, exists := lines.LoadOrStore(line, true); !exists {
+
+		// Check if this is a new line
+		if _, exists := existingLines[line]; !exists {
+			// Add to our tracking map
+			existingLines[line] = struct{}{}
+
+			// Output the line if not in quiet mode
 			if !quietMode {
 				fmt.Println(line)
 			}
-			if !dryRun && f != nil {
-				fmt.Fprintf(f, "%s\n", line)
+
+			// Write to file if we have a writer
+			if writer != nil {
+				fmt.Fprintln(writer, line)
 			}
 		}
+	}
+
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "error reading input: %s\n", err)
+	}
+
+	// Final flush to ensure everything is written
+	if writer != nil {
+		writer.Flush()
 	}
 }
